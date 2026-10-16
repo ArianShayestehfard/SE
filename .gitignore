@@ -15,3 +15,6 @@ target/
 # OS
 Thumbs.db
 .DS_Store
+
+# Python runtime data (JSON files created next to the app)
+*.json

@@ -1,74 +1,79 @@
 # SE — University Library Management System
 
-سیستم مدیریت کتابخانه دانشگاه — پروژه درس برنامه‌نویسی پیشرفته (AP)
+University Library Management System — Advanced Programming (AP) course project.
 
-A console-based University Library Management System written in Java, implementing four user roles (Guest, Student, Employee, Manager) with full borrow-request workflow, statistics and reporting.
+A console-based University Library Management System implemented in **two languages**: Java (`src/`) and Python (`python/`). It covers four user roles (Guest, Student, Employee, Manager) with a full borrow-request workflow, employee performance tracking and statistics.
 
-## امکانات
+## Features
 
-### 🧑‍🎓 دانشجو (Student)
-- ثبت‌نام در سیستم و ورود با نام کاربری و کلمه عبور
-- جستجوی ترکیبی کتاب بر اساس عنوان / نویسنده / سال نشر همراه با وضعیت امانت
-- ثبت درخواست امانت با **بازه زمانی** (تاریخ شروع و پایان)
+### Student
+- Register in the system with a username and password, then log in
+- Combined book search by title / author / publication year, including loan availability
+- Submit a borrow request with a **date range** (desired start and end dates)
 
-### 👤 مهمان (Guest)
-- مشاهده آمار کلی (تعداد دانشجویان، کتاب‌ها، امانت‌ها، کتاب‌های در امانت)
-- جستجو فقط بر اساس نام کتاب — نتایج صرفاً شامل اطلاعات کتاب
+### Guest
+- View overall statistics (registered students, total books, total borrows, currently borrowed books)
+- Search books by title only — results show book information only
 
-### 👨‍💼 کارمند (Employee)
-- ثبت، جستجو و ویرایش اطلاعات کتاب
-- بررسی و تایید درخواست‌های امانتی با تاریخ شروع «امروز یا دیروز»
-- امانت دادن کتاب به دانشجو و ثبت زمان تحویل / دریافت کتاب برگشتی و ثبت زمان دریافت
-- مشاهده گزارش تاریخچه امانات یک دانشجو (کل امانت‌ها، تحویل‌نشده‌ها، تحویل‌های دیرهنگام)
-- فعال / غیرفعال کردن دانشجو
-- تغییر رمز عبور
+### Employee
+- Register, search and edit book information
+- Review and approve borrow requests whose start date is **today or yesterday**
+- Lend a book to a student and record the pickup time; receive a returned book and record the return time
+- View a student's borrow history report (total borrows, undelivered books, late returns)
+- Activate / deactivate students (inactive students cannot borrow)
+- Change password
 
-### 👔 مدیر (Manager)
-- تعریف کارمند جدید
-- مشاهده عملکرد کارمندان (کتاب ثبت‌شده، امانت داده، تحویل گرفته)
-- آمار امانات: تعداد درخواست‌ها، کل امانت‌ها، میانگین مدت امانت
-- آمار دانشجویان + ۱۰ دانشجو با بیشترین تاخیر در تحویل
+### Manager
+- Register new employees
+- View employee performance (books registered, books lent, books received back)
+- Borrow statistics: number of requests, total borrows, average borrow duration
+- Student statistics + top 10 students with the most late returns
 
-## اجرا (Run)
+## Running
 
-نیازمندی: **JDK 8+**
+### Java version (`src/`)
+
+Requires **JDK 8+**.
+
+- IntelliJ IDEA: open the project folder and run `ap.projects.finalproject.LibrarySystem`
+- Command line:
+
+  ```bash
+  javac -encoding UTF-8 -d out src/ap/projects/finalproject/*.java
+  java -cp out ap.projects.finalproject.LibrarySystem
+  ```
+
+### Python version (`python/`)
+
+Requires **Python 3.8+** (standard library only).
 
 ```bash
-# با IntelliJ IDEA
-پوشه پروژه را باز کنید و کلاس ap.projects.finalproject.LibrarySystem را اجرا کنید.
-
-# یا با خط فرمان
-javac -encoding UTF-8 -d out src/ap/projects/finalproject/*.java
-java -cp out ap.projects.finalproject.LibrarySystem
+python python/library_system.py
 ```
 
-### حساب‌های پیش‌فرض
+### Default accounts
 
-| نقش | نام کاربری | رمز |
-|------|-----------|------|
-| مدیر | `admin` | `1234` |
-| کارمند | `staff` | `1234` |
+| Role | Username | Password |
+|------|----------|----------|
+| Manager | `admin` | `1234` |
+| Employee | `staff` | `1234` |
 
-## ساختار (Structure)
+## Structure
 
 ```
-src/ap/projects/finalproject/
-├── LibrarySystem.java        # نقطه شروع برنامه (main) و منطق اصلی
-├── MenuHandler.java          # منوهای کنسولی و تعامل با کاربر
-├── Book / BookManager / BookFileManager
-├── Student / StudentManager / StudentFileManager
-├── Employee / EmployeeManager / EmployeeFileManager
-├── EmployeePerformance(+Manager/FileManager)   # عملکرد کارمندان
-├── BorrowRecord / BorrowManager / BorrowFileManager
-├── BorrowRequest / BorrowRequestManager / BorrowRequestFileManager
-├── BorrowStatistics / StudentStatistics / StudentBorrowReport
-└── StatisticsManager         # آمار عمومی کتابخانه
+├── src/ap/projects/finalproject/   # Java implementation
+│   ├── LibrarySystem.java          # entry point (main) and core logic
+│   ├── MenuHandler.java            # console menus and user interaction
+│   ├── Book / Student / Employee / BorrowRecord / BorrowRequest   # models
+│   ├── *Manager                    # business logic per entity
+│   ├── *FileManager                # Java-serialization persistence (.dat)
+│   └── BorrowStatistics / StudentStatistics / StudentBorrowReport
+└── python/
+    └── library_system.py           # single-file Python implementation (same behavior)
 ```
 
-داده‌ها به‌صورت خودکار با Java Serialization در فایل‌های `.dat` کنار برنامه ذخیره می‌شوند.
+## Notes
 
-## Tech
-
-- Java 8 (Console I/O)
-- Object Serialization for persistence
-- Streams API for queries and statistics
+- The Java version persists data with Java serialization (`.dat` files); the Python version uses JSON files. Both are created in the working directory on first run.
+- Passwords are stored in plain text — this is an educational project.
+- Java sources target Java 8; the Python implementation uses only the standard library.
