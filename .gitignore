@@ -1,0 +1,17 @@
+# Build output
+out/
+build/
+target/
+*.class
+
+# Runtime data (created next to the app on first run)
+*.dat
+
+# IDE
+.idea/workspace.xml
+.idea/tasks.xml
+.idea/shelf/
+
+# OS
+Thumbs.db
+.DS_Store
