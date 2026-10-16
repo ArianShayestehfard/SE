@@ -5,16 +5,14 @@ Console application for the Advanced Programming (AP) course project:
 four user roles (Guest, Student, Employee, Manager), a full borrow-request
 workflow with start/end dates, employee performance tracking and statistics.
 
-Data is persisted as JSON files in the current working directory.
+Data is persisted in a SQLite database (``library.db``) created in the
+current working directory by :mod:`database`.
 Requires Python 3.8+ (standard library only).
 """
 
 from __future__ import annotations
 
-import json
-import os
-import sys
-from dataclasses import dataclass, asdict
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Callable, List, Optional, Tuple
 
@@ -24,26 +22,6 @@ import database
 # ---------------------------------------------------------------------------
 # Persistence helpers
 # ---------------------------------------------------------------------------
-
-def _load_json(filename: str, default):
-    path = os.path.join(os.getcwd(), filename)
-    if not os.path.exists(path):
-        return default
-    try:
-        with open(path, "r", encoding="utf-8") as fh:
-            return json.load(fh)
-    except (OSError, json.JSONDecodeError) as exc:
-        print(f"Error loading {filename}: {exc}")
-        return default
-
-
-def _save_json(filename: str, data) -> None:
-    path = os.path.join(os.getcwd(), filename)
-    try:
-        with open(path, "w", encoding="utf-8") as fh:
-            json.dump(data, fh, indent=2, ensure_ascii=False)
-    except OSError as exc:
-        print(f"Error saving {filename}: {exc}")
 
 
 # ---------------------------------------------------------------------------
@@ -593,37 +571,40 @@ class BorrowManager:
 
 
 class EmployeePerformanceManager:
-    FILE = "employee_performance.json"
+    def _ensure(self, username: str) -> None:
+        database.execute(
+            "INSERT OR IGNORE INTO employee_performance (employee_username, last_activity_date) "
+            "VALUES (?, ?)", (username, date.today().isoformat()))
 
-    def __init__(self):
-        self.records: dict = {u: EmployeePerformance(**d)
-                              for u, d in _load_json(self.FILE, {}).items()}
+    def _record(self, column: str, username: str) -> None:
+        self._ensure(username)
+        database.execute(
+            f"UPDATE employee_performance SET {column} = {column} + 1, "
+            "last_activity_date = ? WHERE employee_username = ?",
+            (date.today().isoformat(), username))
 
-    def _save(self) -> None:
-        _save_json(self.FILE, {u: asdict(p) for u, p in self.records.items()})
-
-    def _ensure(self, username: str) -> EmployeePerformance:
-        if username not in self.records:
-            self.records[username] = EmployeePerformance(username)
-        return self.records[username]
-
-    def record_book_added(self, username): self._ensure(username).books_added += 1; self._save()
-    def record_book_edited(self, username): self._ensure(username).books_edited += 1; self._save()
-    def record_book_lent(self, username): self._ensure(username).books_borrowed += 1; self._save()
-    def record_book_received(self, username): self._ensure(username).books_returned += 1; self._save()
-    def record_request_approved(self, username): self._ensure(username).borrow_requests_approved += 1; self._save()
-    def record_request_rejected(self, username): self._ensure(username).borrow_requests_rejected += 1; self._save()
+    def record_book_added(self, username): self._record("books_added", username)
+    def record_book_edited(self, username): self._record("books_edited", username)
+    def record_book_lent(self, username): self._record("books_borrowed", username)
+    def record_book_received(self, username): self._record("books_returned", username)
+    def record_request_approved(self, username): self._record("borrow_requests_approved", username)
+    def record_request_rejected(self, username): self._record("borrow_requests_rejected", username)
 
     def display(self, username: str) -> None:
-        self._ensure(username).display()
+        self._ensure(username)
+        row = database.query_one(
+            "SELECT * FROM employee_performance WHERE employee_username = ?", (username,))
+        EmployeePerformance(**dict(row)).display()
 
     def display_all(self) -> None:
         print("\n=== All Employees Performance Report ===")
-        if not self.records:
+        rows = database.query_all(
+            "SELECT * FROM employee_performance ORDER BY employee_username")
+        if not rows:
             print("No performance records found.")
             return
-        for performance in self.records.values():
-            print(performance)
+        for row in rows:
+            print(EmployeePerformance(**dict(row)))
 
 
 # ---------------------------------------------------------------------------

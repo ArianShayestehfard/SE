@@ -16,7 +16,7 @@ target/
 Thumbs.db
 .DS_Store
 
-# Python runtime data (JSON files created next to the app)
-*.json
+# Python runtime data (SQLite database created next to the app)
+*.db
 __pycache__/
 *.pyc
