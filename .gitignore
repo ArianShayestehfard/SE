@@ -18,3 +18,5 @@ Thumbs.db
 
 # Python runtime data (JSON files created next to the app)
 *.json
+__pycache__/
+*.pyc
