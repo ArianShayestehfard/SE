@@ -18,6 +18,8 @@ from dataclasses import dataclass, asdict
 from datetime import date, timedelta
 from typing import Callable, List, Optional, Tuple
 
+import database
+
 
 # ---------------------------------------------------------------------------
 # Persistence helpers
@@ -223,17 +225,19 @@ class EmployeePerformance:
 # Managers
 # ---------------------------------------------------------------------------
 
+def _row_to_student(row) -> Student:
+    return Student(row["name"], row["student_id"], row["username"],
+                   row["password"], bool(row["is_active"]))
+
+
 class StudentManager:
-    FILE = "students.json"
-
-    def __init__(self):
-        self.students: List[Student] = [Student(**d) for d in _load_json(self.FILE, [])]
-
-    def _save(self) -> None:
-        _save_json(self.FILE, [asdict(s) for s in self.students])
-
     def find(self, username: str) -> Optional[Student]:
-        return next((s for s in self.students if s.username == username), None)
+        row = database.query_one("SELECT * FROM students WHERE username = ?", (username,))
+        return _row_to_student(row) if row else None
+
+    def all(self) -> List[Student]:
+        return [_row_to_student(row)
+                for row in database.query_all("SELECT * FROM students ORDER BY username")]
 
     def register(self, name, student_id, username, password) -> None:
         if not username or not password:
@@ -242,8 +246,9 @@ class StudentManager:
         if self.find(username):
             print("This username already exists. Please choose a different username.")
             return
-        self.students.append(Student(name, student_id, username, password))
-        self._save()
+        database.execute(
+            "INSERT INTO students (name, student_id, username, password) VALUES (?, ?, ?, ?)",
+            (name, student_id, username, password))
         print("Student registration completed successfully.")
 
     def authenticate(self, username: str, password: str) -> Optional[Student]:
@@ -256,34 +261,31 @@ class StudentManager:
         return student
 
     def update_info(self, username, new_name, new_password) -> bool:
-        student = self.find(username)
-        if student is None:
-            return False
-        updated = False
+        assignments, params = [], []
         if new_name:
-            student.name = new_name
-            updated = True
+            assignments.append("name = ?")
+            params.append(new_name)
         if new_password:
-            student.password = new_password
-            updated = True
-        if updated:
-            self._save()
-        return updated
+            assignments.append("password = ?")
+            params.append(new_password)
+        if not assignments:
+            return False
+        params.append(username)
+        return database.execute(
+            "UPDATE students SET " + ", ".join(assignments) + " WHERE username = ?",
+            tuple(params)) > 0
 
     def toggle_status(self, username: str) -> bool:
-        student = self.find(username)
-        if student is None:
-            return False
-        student.is_active = not student.is_active
-        self._save()
-        return True
+        return database.execute(
+            "UPDATE students SET is_active = 1 - is_active WHERE username = ?",
+            (username,)) > 0
 
     def count(self) -> int:
-        return len(self.students)
+        return database.query_one("SELECT COUNT(*) AS total FROM students")["total"]
 
     def display_students_with_most_late(self, limit: int, records: List[BorrowRecord]) -> None:
         infos = []
-        for student in self.students:
+        for student in self.all():
             late_count = sum(1 for r in records
                              if r.student_username == student.username and r.is_late())
             if late_count > 0:
@@ -299,25 +301,10 @@ class StudentManager:
 
 
 class EmployeeManager:
-    FILE = "employees.json"
-    DEFAULTS = [
-        {"name": "mr.shahi", "employee_id": "1111", "username": "admin",
-         "password": "1234", "role": "manager"},
-        {"name": "mrs.tiem", "employee_id": "2222", "username": "staff",
-         "password": "1234", "role": "staff"},
-    ]
-
-    def __init__(self):
-        self.employees: List[Employee] = [Employee(**d) for d in _load_json(self.FILE, [])]
-        if not self.employees:
-            self.employees = [Employee(**d) for d in self.DEFAULTS]
-            self._save()
-
-    def _save(self) -> None:
-        _save_json(self.FILE, [asdict(e) for e in self.employees])
-
     def find(self, username: str) -> Optional[Employee]:
-        return next((e for e in self.employees if e.username == username), None)
+        row = database.query_one("SELECT * FROM employees WHERE username = ?", (username,))
+        return Employee(row["name"], row["employee_id"], row["username"],
+                        row["password"], row["role"]) if row else None
 
     def register(self, name, employee_id, username, password, role) -> None:
         if not username or not password:
@@ -326,8 +313,9 @@ class EmployeeManager:
         if self.find(username):
             print("This username already exists. Please choose a different username.")
             return
-        self.employees.append(Employee(name, employee_id, username, password, role))
-        self._save()
+        database.execute(
+            "INSERT INTO employees (name, employee_id, username, password, role) "
+            "VALUES (?, ?, ?, ?, ?)", (name, employee_id, username, password, role))
         print("Employee registration completed successfully.")
 
     def authenticate(self, username: str, password: str) -> Optional[Employee]:
@@ -337,20 +325,19 @@ class EmployeeManager:
         return None
 
     def change_password(self, username, current_password, new_password) -> bool:
-        employee = self.find(username)
-        if employee is not None and employee.password == current_password:
-            employee.password = new_password
-            self._save()
-            return True
-        return False
+        return database.execute(
+            "UPDATE employees SET password = ? WHERE username = ? AND password = ?",
+            (new_password, username, current_password)) > 0
 
     def display_all(self) -> None:
         print("\n--- List of Employees ---")
-        if not self.employees:
+        rows = database.query_all("SELECT * FROM employees ORDER BY username")
+        if not rows:
             print("No employees registered yet.")
             return
-        for employee in self.employees:
-            print(employee)
+        for row in rows:
+            print(Employee(row["name"], row["employee_id"], row["username"],
+                           row["password"], row["role"]))
 
 
 class BookManager:
@@ -726,6 +713,7 @@ class BorrowStatistics:
 
 class LibrarySystem:
     def __init__(self):
+        database.init_db()
         self.students = StudentManager()
         self.books = BookManager()
         self.borrows = BorrowManager()
@@ -1078,7 +1066,7 @@ class LibrarySystem:
         if not self._manager_logged_in():
             return
         records = self.borrows.all_records()
-        StudentStatistics(self.students.students, records).display()
+        StudentStatistics(self.students.all(), records).display()
         self.students.display_students_with_most_late(10, records)
 
     def display_my_performance(self) -> None:
