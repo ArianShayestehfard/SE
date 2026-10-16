@@ -83,6 +83,20 @@ Runs the complete borrow workflow (registration → request → approval → pic
 
 ## Architecture
 
+### Data flow
+
+```mermaid
+flowchart RL
+    ROLES["User Roles<br/>Guest · Student · Employee · Manager"] -->|"console menus"| UI["MenuHandler<br/>Console UI"]
+    UI -->|"workflow calls"| SYS["LibrarySystem — Application Facade"]
+    SYS -->|"delegates to"| MGR["Domain Managers<br/>Student · Book · Borrow · BorrowRequest<br/>Employee · EmployeePerformance"]
+    MGR -->|"Python — SQL queries"| DB[("SQLite<br/>library.db")]
+    MGR -->|"Java — object serialization"| DAT[("*.dat files<br/>books · students · employees · borrows")]
+    SYS -->|"aggregates"| STATS["Statistics & Reports<br/>BorrowStatistics · StudentStatistics<br/>StudentBorrowReport"]
+```
+
+### Layers
+
 ![Architecture diagram](docs/architecture.svg)
 
 Layered design (identical in both implementations):
