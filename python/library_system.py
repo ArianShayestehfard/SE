@@ -66,6 +66,7 @@ class Book:
         return line
 
     def matches(self, title=None, author=None, year=None, isbn=None) -> bool:
+        """In-memory convenience filter (the managers query SQLite directly)."""
         if title and title.lower() not in self.title.lower():
             return False
         if author and author.lower() not in self.author.lower():
@@ -340,28 +341,47 @@ class EmployeeManager:
                            row["password"], row["role"]))
 
 
+def _row_to_book(row) -> Book:
+    return Book(row["title"], row["author"], row["publication_year"],
+                row["isbn"], bool(row["available"]))
+
+
 class BookManager:
-    FILE = "books.json"
-
-    def __init__(self):
-        self.books: List[Book] = [Book(**d) for d in _load_json(self.FILE, [])]
-
-    def _save(self) -> None:
-        _save_json(self.FILE, [asdict(b) for b in self.books])
-
     def find(self, isbn: str) -> Optional[Book]:
-        return next((b for b in self.books if b.isbn == isbn), None)
+        row = database.query_one("SELECT * FROM books WHERE isbn = ?", (isbn,))
+        return _row_to_book(row) if row else None
+
+    def all(self) -> List[Book]:
+        return [_row_to_book(row)
+                for row in database.query_all("SELECT * FROM books ORDER BY isbn")]
 
     def add_new_book(self, book: Book) -> None:
         if self.find(book.isbn):
             print("A book with this ISBN already exists.")
             return
-        self.books.append(book)
-        self._save()
+        database.execute(
+            "INSERT INTO books (isbn, title, author, publication_year) VALUES (?, ?, ?, ?)",
+            (book.isbn, book.title, book.author, book.publication_year))
         print("Book added successfully!")
 
     def search_books(self, title=None, author=None, year=None, isbn=None) -> List[Book]:
-        return [b for b in self.books if b.matches(title, author, year, isbn)]
+        clauses, params = [], []
+        if title:
+            clauses.append("LOWER(title) LIKE ?")
+            params.append(f"%{title.lower()}%")
+        if author:
+            clauses.append("LOWER(author) LIKE ?")
+            params.append(f"%{author.lower()}%")
+        if year is not None:
+            clauses.append("publication_year = ?")
+            params.append(year)
+        if isbn:
+            clauses.append("LOWER(isbn) LIKE ?")
+            params.append(f"%{isbn.lower()}%")
+        where = (" WHERE " + " AND ".join(clauses)) if clauses else ""
+        rows = database.query_all("SELECT * FROM books" + where + " ORDER BY isbn",
+                                  tuple(params))
+        return [_row_to_book(row) for row in rows]
 
     def search_by_title(self, title: str) -> List[Book]:
         if not title:
@@ -369,40 +389,43 @@ class BookManager:
         return self.search_books(title=title)
 
     def edit_book(self, isbn, new_title, new_author, new_year) -> bool:
-        book = self.find(isbn)
-        if book is None:
-            return False
+        assignments, params = [], []
         if new_title:
-            book.title = new_title
+            assignments.append("title = ?")
+            params.append(new_title)
         if new_author:
-            book.author = new_author
+            assignments.append("author = ?")
+            params.append(new_author)
         if new_year:
-            book.publication_year = new_year
-        self._save()
-        return True
+            assignments.append("publication_year = ?")
+            params.append(new_year)
+        if not assignments:
+            return False
+        params.append(isbn)
+        return database.execute(
+            "UPDATE books SET " + ", ".join(assignments) + " WHERE isbn = ?",
+            tuple(params)) > 0
 
     def set_available(self, isbn: str, available: bool) -> bool:
-        book = self.find(isbn)
-        if book is None or book.available == available:
-            return False
-        book.available = available
-        self._save()
-        return True
+        return database.execute(
+            "UPDATE books SET available = ? WHERE isbn = ? AND available <> ?",
+            (int(available), isbn, int(available))) > 0
 
     def total_count(self) -> int:
-        return len(self.books)
+        return database.query_one("SELECT COUNT(*) AS total FROM books")["total"]
 
     def display_all(self) -> None:
         print("\n--- All Books in Library ---")
-        if not self.books:
+        books = self.all()
+        if not books:
             print("No books available in the library.")
             return
-        for book in self.books:
+        for book in books:
             print(book.info(with_status=True))
 
     def display_available(self) -> None:
         print("\n--- Available Books ---")
-        available = [b for b in self.books if b.available]
+        available = [b for b in self.all() if b.available]
         if not available:
             print("No books available at the moment.")
             return
