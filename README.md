@@ -58,6 +58,14 @@ python python/library_system.py
 | Manager | `admin` | `1234` |
 | Employee | `staff` | `1234` |
 
+### Testing (Python)
+
+```bash
+python tools/test_python_sqlite.py
+```
+
+Runs the complete borrow workflow (registration → request → approval → pickup → return → statistics) against a throwaway SQLite database and prints one line per check.
+
 ## Structure
 
 ```
@@ -69,7 +77,8 @@ python python/library_system.py
 │   ├── *FileManager                # Java-serialization persistence (.dat)
 │   └── BorrowStatistics / StudentStatistics / StudentBorrowReport
 └── python/
-    └── library_system.py           # single-file Python implementation (same behavior)
+    ├── library_system.py           # Python implementation (same behavior as Java)
+    └── database.py                 # SQLite persistence layer (schema + queries)
 ```
 
 ## Architecture
@@ -88,6 +97,6 @@ The editable diagram source is [`docs/architecture.excalidraw`](docs/architectur
 
 ## Notes
 
-- The Java version persists data with Java serialization (`.dat` files); the Python version uses JSON files. Both are created in the working directory on first run.
+- The Java version persists data with Java serialization (`.dat` files); the Python version stores data in a **SQLite** database (`library.db`, created in the working directory) with tables `books`, `students`, `employees`, `borrow_requests`, `borrow_records` and `employee_performance`.
 - Passwords are stored in plain text — this is an educational project.
 - Java sources target Java 8; the Python implementation uses only the standard library.
