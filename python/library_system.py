@@ -120,6 +120,7 @@ class BorrowRequest:
     desired_end: str
     status: str = "pending"
     rejection_reason: str = ""
+    id: Optional[int] = None
 
     def is_pending(self) -> bool:
         return self.status == "pending"
@@ -156,6 +157,7 @@ class BorrowRecord:
     actual_pickup_date: Optional[str] = None
     returned: bool = False
     picked_up: bool = False
+    id: Optional[int] = None
 
     def is_overdue(self) -> bool:
         return (self.picked_up and not self.returned
@@ -443,50 +445,62 @@ class BookManager:
         print(f"Found {len(results)} book(s)")
 
 
+def _row_to_request(row) -> BorrowRequest:
+    return BorrowRequest(row["student_username"], row["book_isbn"], row["request_date"],
+                         row["desired_start"], row["desired_end"], row["status"],
+                         row["rejection_reason"], row["id"])
+
+
 class BorrowRequestManager:
-    FILE = "borrow_requests.json"
-
-    def __init__(self):
-        self.requests: List[BorrowRequest] = [BorrowRequest(**d) for d in _load_json(self.FILE, [])]
-
-    def _save(self) -> None:
-        _save_json(self.FILE, [asdict(r) for r in self.requests])
-
     def create(self, username, isbn, start_iso, end_iso) -> None:
         if self.find_pending(username, isbn) is not None:
             print("You already have a pending request for this book.")
             return
-        self.requests.append(BorrowRequest(username, isbn, date.today().isoformat(),
-                                           start_iso, end_iso))
-        self._save()
+        database.execute(
+            "INSERT INTO borrow_requests (student_username, book_isbn, request_date, "
+            "desired_start, desired_end) VALUES (?, ?, ?, ?, ?)",
+            (username, isbn, date.today().isoformat(), start_iso, end_iso))
         print("Borrow request submitted successfully. Waiting for approval.")
 
     def all_requests(self) -> List[BorrowRequest]:
-        return list(self.requests)
+        return [_row_to_request(row)
+                for row in database.query_all("SELECT * FROM borrow_requests ORDER BY id")]
 
     def pending(self) -> List[BorrowRequest]:
-        return [r for r in self.requests if r.is_pending()]
+        return [_row_to_request(row) for row in database.query_all(
+            "SELECT * FROM borrow_requests WHERE status = 'pending' ORDER BY id")]
 
     def pending_approvable(self) -> List[BorrowRequest]:
-        return [r for r in self.requests if r.is_pending() and r.is_approvable_date()]
+        today = date.today().isoformat()
+        yesterday = (date.today() - timedelta(days=1)).isoformat()
+        return [_row_to_request(row) for row in database.query_all(
+            "SELECT * FROM borrow_requests WHERE status = 'pending' "
+            "AND desired_start IN (?, ?) ORDER BY id", (today, yesterday))]
 
     def for_student(self, username: str) -> List[BorrowRequest]:
-        return [r for r in self.requests if r.student_username == username]
+        return [_row_to_request(row) for row in database.query_all(
+            "SELECT * FROM borrow_requests WHERE student_username = ? ORDER BY id",
+            (username,))]
 
     def find_pending(self, username: str, isbn: str) -> Optional[BorrowRequest]:
-        return next((r for r in self.requests
-                     if r.student_username == username and r.book_isbn == isbn
-                     and r.is_pending()), None)
+        row = database.query_one(
+            "SELECT * FROM borrow_requests WHERE student_username = ? AND book_isbn = ? "
+            "AND status = 'pending' ORDER BY id LIMIT 1", (username, isbn))
+        return _row_to_request(row) if row else None
 
     def approve(self, request: BorrowRequest) -> None:
+        database.execute(
+            "UPDATE borrow_requests SET status = 'approved', rejection_reason = '' "
+            "WHERE id = ?", (request.id,))
         request.status = "approved"
         request.rejection_reason = ""
-        self._save()
 
     def reject(self, request: BorrowRequest, reason: str) -> None:
+        database.execute(
+            "UPDATE borrow_requests SET status = 'rejected', rejection_reason = ? "
+            "WHERE id = ?", (reason, request.id))
         request.status = "rejected"
         request.rejection_reason = reason
-        self._save()
 
     def display_pending(self) -> None:
         print("\n--- Pending Borrow Requests ---")
@@ -507,38 +521,37 @@ class BorrowRequestManager:
             print(request)
 
 
+def _row_to_record(row) -> BorrowRecord:
+    return BorrowRecord(row["student_username"], row["book_isbn"], row["borrow_date"],
+                        row["due_date"], row["return_date"], row["actual_pickup_date"],
+                        bool(row["returned"]), bool(row["picked_up"]), row["id"])
+
+
 class BorrowManager:
-    FILE = "borrow_records.json"
-
-    def __init__(self):
-        self.records: List[BorrowRecord] = [BorrowRecord(**d) for d in _load_json(self.FILE, [])]
-
-    def _save(self) -> None:
-        _save_json(self.FILE, [asdict(r) for r in self.records])
-
     def all_records(self) -> List[BorrowRecord]:
-        return list(self.records)
+        return [_row_to_record(row)
+                for row in database.query_all("SELECT * FROM borrow_records ORDER BY id")]
 
     def create_borrow(self, username, isbn, start_iso, end_iso) -> None:
-        self.records.append(BorrowRecord(username, isbn, start_iso, end_iso))
-        self._save()
+        database.execute(
+            "INSERT INTO borrow_records (student_username, book_isbn, borrow_date, due_date) "
+            "VALUES (?, ?, ?, ?)", (username, isbn, start_iso, end_iso))
 
     def mark_picked_up(self, username: str, isbn: str) -> bool:
-        record = self.find_ready_for_pickup(username, isbn)
-        if record is None:
-            return False
-        record.picked_up = True
-        record.actual_pickup_date = date.today().isoformat()
-        self._save()
-        return True
+        return database.execute(
+            "UPDATE borrow_records SET picked_up = 1, actual_pickup_date = ? "
+            "WHERE student_username = ? AND book_isbn = ? AND picked_up = 0 AND returned = 0",
+            (date.today().isoformat(), username, isbn)) > 0
 
     def find_ready_for_pickup(self, username: str, isbn: str) -> Optional[BorrowRecord]:
-        return next((r for r in self.records
-                     if r.student_username == username and r.book_isbn == isbn
-                     and r.is_ready_for_pickup()), None)
+        row = database.query_one(
+            "SELECT * FROM borrow_records WHERE student_username = ? AND book_isbn = ? "
+            "AND picked_up = 0 AND returned = 0 ORDER BY id LIMIT 1", (username, isbn))
+        return _row_to_record(row) if row else None
 
     def ready_for_pickup(self) -> List[BorrowRecord]:
-        return [r for r in self.records if r.is_ready_for_pickup()]
+        return [_row_to_record(row) for row in database.query_all(
+            "SELECT * FROM borrow_records WHERE picked_up = 0 AND returned = 0 ORDER BY id")]
 
     def display_ready_for_pickup(self) -> None:
         print("\n--- Books Ready for Pickup ---")
@@ -550,30 +563,33 @@ class BorrowManager:
             print(record)
 
     def find_active(self, username: str, isbn: str) -> Optional[BorrowRecord]:
-        return next((r for r in self.records
-                     if r.student_username == username and r.book_isbn == isbn
-                     and not r.returned), None)
+        row = database.query_one(
+            "SELECT * FROM borrow_records WHERE student_username = ? AND book_isbn = ? "
+            "AND returned = 0 ORDER BY id LIMIT 1", (username, isbn))
+        return _row_to_record(row) if row else None
 
     def return_book(self, username: str, isbn: str) -> bool:
-        record = self.find_active(username, isbn)
-        if record is None or not record.picked_up:
-            return False
-        record.returned = True
-        record.return_date = date.today().isoformat()
-        self._save()
-        return True
+        return database.execute(
+            "UPDATE borrow_records SET returned = 1, return_date = ? "
+            "WHERE student_username = ? AND book_isbn = ? AND picked_up = 1 AND returned = 0",
+            (date.today().isoformat(), username, isbn)) > 0
 
     def not_returned(self) -> List[BorrowRecord]:
-        return [r for r in self.records if not r.returned]
+        return [_row_to_record(row) for row in database.query_all(
+            "SELECT * FROM borrow_records WHERE returned = 0 ORDER BY id")]
 
     def for_student(self, username: str) -> List[BorrowRecord]:
-        return [r for r in self.records if r.student_username == username]
+        return [_row_to_record(row) for row in database.query_all(
+            "SELECT * FROM borrow_records WHERE student_username = ? ORDER BY id",
+            (username,))]
 
     def total_count(self) -> int:
-        return len(self.records)
+        return database.query_one("SELECT COUNT(*) AS total FROM borrow_records")["total"]
 
     def borrowed_out_count(self) -> int:
-        return sum(1 for r in self.records if r.picked_up and not r.returned)
+        return database.query_one(
+            "SELECT COUNT(*) AS total FROM borrow_records "
+            "WHERE picked_up = 1 AND returned = 0")["total"]
 
 
 class EmployeePerformanceManager:
